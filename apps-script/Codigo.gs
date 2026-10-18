@@ -111,7 +111,7 @@ function filaAPersona(f) {
 }
 
 function personaAFila(p) {
-  return [p.id, p.nombre, p.detalle, p.dia, p.mes, p.estado, p.fuente, p.agregado];
+  return [p.id, texto_(p.nombre), texto_(p.detalle), p.dia, p.mes, p.estado, p.fuente, p.agregado];
 }
 
 function publica_(p) {
@@ -130,10 +130,12 @@ function procesar(peticion, props, almacen, hoy) {
   if (!rol) return { ok: false, error: 'clave' };
 
   var filas = almacen.leer();
-  var inicio = filas.length && filas[0][0] === 'id' ? 1 : 0;
+  var inicio = filas.length && String(filas[0][0]).replace(/^﻿/, '') === 'id' ? 1 : 0;
   var personas = [];
   for (var i = inicio; i < filas.length; i++) {
-    if (filas[i][0] !== '' && filas[i][0] != null) personas.push({ fila: i, p: filaAPersona(filas[i]) });
+    if (filas[i][0] === '' || filas[i][0] == null) continue;
+    var leida = filaAPersona(filas[i]);
+    if (!validarPersona(leida)) personas.push({ fila: i, p: leida }); // una fila dañada a mano no rompe la página
   }
   var activos = personas.filter(function (x) { return x.p.estado !== 'retirado'; });
 
@@ -158,7 +160,7 @@ function procesar(peticion, props, almacen, hoy) {
     }
     var ultimo = personas.reduce(function (m, x) { return Math.max(m, parseInt(x.p.id.slice(1), 10) || 0); }, 0);
     var nueva = {
-      id: 'p' + ('000' + (ultimo + 1)).slice(-4), nombre: texto_(nombre), detalle: texto_(dato.detalle),
+      id: 'p' + ('000' + (ultimo + 1)).slice(-4), nombre: nombre, detalle: String(dato.detalle || '').trim(),
       dia: Number(dato.dia), mes: Number(dato.mes), estado: 'activo', fuente: 'página', agregado: hoy,
     };
     almacen.agregarFila(personaAFila(nueva));
@@ -171,8 +173,8 @@ function procesar(peticion, props, almacen, hoy) {
 
   if (peticion.accion === 'editar') {
     if (validarPersona(dato)) return { ok: false, error: 'datos', mensaje: validarPersona(dato) };
-    p.nombre = texto_(dato.nombre);
-    p.detalle = texto_(dato.detalle);
+    p.nombre = String(dato.nombre).trim();
+    p.detalle = String(dato.detalle || '').trim();
     p.dia = Number(dato.dia);
     p.mes = Number(dato.mes);
   } else if (peticion.accion === 'quitar') {

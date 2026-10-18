@@ -141,3 +141,20 @@ test('un nombre que empieza con = no se vuelve fórmula en la hoja', () => {
   S.procesar({ accion: 'agregar', clave: 'editor456', persona: { nombre: '=IMPORTXML("x")', dia: 1, mes: 1 } }, PROPS, a, HOY);
   assert.equal(a.filas[2][1], "'=IMPORTXML(\"x\")");
 });
+
+test('quitar no convierte en fórmula un nombre que la hoja devolvió sin apóstrofo', () => {
+  const a = almacen([['p0001', '=HACK()', '', 5, 11, 'activo', 'x', '']]);
+  S.procesar({ accion: 'quitar', clave: 'editor456', persona: { id: 'p0001' } }, PROPS, a, HOY);
+  assert.equal(a.filas[0][1], "'=HACK()");
+});
+
+test('una fila dañada en la hoja no rompe la lista', () => {
+  const a = almacen([
+    ['﻿id', 'nombre', 'detalle', 'dia', 'mes', 'estado', 'fuente', 'agregado'],
+    ['p0001', 'Ana Prueba', '', 5, 11, 'activo', 'x', ''],
+    ['p0002', 'Sin Mes', '', 5, '', 'activo', 'x', ''],
+    ['p0003', 'Mes Fecha', '', 5, new Date(), 'activo', 'x', ''],
+  ]);
+  const r = S.procesar({ accion: 'lista', clave: 'equipo123' }, PROPS, a, HOY);
+  assert.deepEqual(r.personas.map((p) => p.id), ['p0001']);
+});
