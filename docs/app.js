@@ -1,0 +1,314 @@
+// Pantalla de la página de cumpleaños. Las cuentas están en logica.js.
+(function () {
+  var L = window.Logica;
+  var URL_SERVIDOR = (window.CONFIG || {}).url || '';
+  var DEMO = /[?&]demo=1\b/.test(location.search);
+  var LLAVE = 'cumple-clave';
+  var e = L.escapar;
+
+  var estado = {
+    personas: [], retirados: [], editor: false, hoy: L.hoyColombia(new Date()), mes: null,
+    abiertos: { hoy: true, proximos: true }, formulario: null, confirmar: null, aviso: '', copiar: null, ocupado: false,
+  };
+
+  function leerClave() { try { return localStorage.getItem(LLAVE) || ''; } catch (x) { return ''; } }
+  function guardarClave(c) { try { localStorage.setItem(LLAVE, c); } catch (x) { /* sin memoria: se pedirá otra vez */ } }
+  function olvidarClave() { try { localStorage.removeItem(LLAVE); } catch (x) { /* nada */ } }
+  var clave = leerClave();
+
+  var $ = function (id) { return document.getElementById(id); };
+  var main = $('contenido');
+
+  // ---------- Servidor ----------
+
+  function pedirLista() {
+    if (DEMO) return fetch('demo.json').then(function (r) { return r.json(); });
+    return fetch(URL_SERVIDOR + '?accion=lista&clave=' + encodeURIComponent(clave)).then(function (r) { return r.json(); });
+  }
+
+  function enviar(accion, persona, forzar) {
+    if (DEMO) return Promise.resolve(simular(accion, persona, forzar));
+    return fetch(URL_SERVIDOR, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // sin "preflight" de CORS
+      body: JSON.stringify({ clave: clave, accion: accion, persona: persona, forzar: !!forzar }),
+    }).then(function (r) { return r.json(); });
+  }
+
+  // En ?demo=1 los cambios quedan solo en esta pantalla.
+  function simular(accion, persona, forzar) {
+    var todos = estado.personas.concat(estado.retirados);
+    var buscar = function (lista) { return lista.findIndex(function (p) { return p.id === persona.id; }); };
+    if (accion === 'agregar') {
+      var parecidos = estado.personas.filter(function (p) { return p.nombre.toLowerCase() === persona.nombre.trim().toLowerCase(); });
+      if (parecidos.length && !forzar) return { ok: false, error: 'parecido', parecidos: parecidos };
+      estado.personas.push({ id: 'd' + (todos.length + 1), nombre: persona.nombre.trim(), detalle: persona.detalle, dia: persona.dia, mes: persona.mes });
+    } else if (accion === 'editar') {
+      estado.personas[buscar(estado.personas)] = persona;
+    } else if (accion === 'quitar') {
+      estado.retirados.push(estado.personas.splice(buscar(estado.personas), 1)[0]);
+    } else if (accion === 'restaurar') {
+      estado.personas.push(estado.retirados.splice(buscar(estado.retirados), 1)[0]);
+    }
+    return { ok: true, demo: true };
+  }
+
+  function cargar() {
+    main.innerHTML = '<p class="vacio">Cargando…</p>';
+    pedirLista().then(function (r) {
+      if (!r.ok) {
+        if (r.error === 'clave') {
+          olvidarClave();
+          clave = '';
+          return pantallaClave('Esa clave no sirve. Pídele la clave nueva a Noffal.');
+        }
+        return pantallaError();
+      }
+      estado.personas = r.personas || [];
+      estado.retirados = r.retirados || [];
+      estado.editor = !!r.editor;
+      pintar();
+    }).catch(pantallaError);
+  }
+
+  // ---------- Pantallas ----------
+
+  function pantallaClave(mensaje) {
+    $('meses').classList.add('oculto');
+    $('pie').classList.add('oculto');
+    main.innerHTML =
+      '<form class="panel" id="form-clave"><h2>Escribe la clave del equipo</h2>' +
+      (mensaje ? '<p class="error">' + e(mensaje) + '</p>' : '') +
+      '<label for="clave">Clave</label><input id="clave" type="password" autocomplete="current-password" required>' +
+      '<p class="vacio">Solo la primera vez: este celular la recuerda.</p>' +
+      '<button class="accion principal" type="submit">Entrar</button></form>';
+    $('form-clave').addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      clave = $('clave').value.trim();
+      if (!clave) return;
+      guardarClave(clave);
+      cargar();
+    });
+    $('clave').focus();
+  }
+
+  function pantallaError() {
+    main.innerHTML = '<div class="panel"><p class="error">No se pudo conectar. Intenta de nuevo.</p>' +
+      '<button class="accion principal" type="button" data-accion="reintentar">Intentar de nuevo</button></div>';
+  }
+
+  function contarMes(mes) {
+    return estado.personas.filter(function (p) { return p.mes === mes; }).length;
+  }
+
+  function pintar() {
+    var hoy = estado.hoy;
+    if (!estado.mes) estado.mes = hoy.mes;
+    $('subtitulo').textContent = 'Oficina del Diputado Felipe Ferro · Hoy: ' + hoy.dia + ' de ' + L.nombreMes(hoy.mes) +
+      (DEMO ? ' · DEMOSTRACIÓN (nombres inventados)' : '');
+    var nav = $('meses');
+    nav.innerHTML = L.ordenPestanas(hoy.mes).map(function (m) {
+      var nombre = L.nombreMes(m);
+      return '<button type="button" data-accion="mes" data-mes="' + m + '"' + (m === estado.mes ? ' class="activo"' : '') + '>' +
+        nombre.charAt(0).toUpperCase() + nombre.slice(1) + ' · ' + contarMes(m) + '</button>';
+    }).join('');
+    nav.classList.remove('oculto');
+    $('pie').classList.toggle('oculto', DEMO);
+
+    var mes = estado.mes;
+    var titulo = L.nombreMes(mes).charAt(0).toUpperCase() + L.nombreMes(mes).slice(1);
+    var html = '<div class="barra"><div><h2>' + titulo + '</h2><span class="total">' + contarMes(mes) + ' cumpleaños</span></div><div>' +
+      '<button class="accion" type="button" data-accion="copiar">📋 Copiar lista</button> ' +
+      (estado.editor ? '<button class="accion principal" type="button" data-accion="nuevo">+ Agregar</button>' : '') +
+      '</div></div>';
+    if (estado.aviso) html += '<p class="aviso">' + e(estado.aviso) + '</p>';
+    if (estado.copiar !== null) {
+      html += '<div class="panel"><p class="vacio">No se pudo copiar solo. Mantén presionado el texto, cópialo y pégalo en WhatsApp:</p>' +
+        '<textarea id="texto-copiar" readonly>' + e(estado.copiar) + '</textarea></div>';
+    }
+    if (estado.formulario) html += formulario();
+
+    if (mes === hoy.mes) {
+      var s = L.seccionesDelMes(estado.personas, hoy);
+      html += seccion('hoy', 'Hoy · ' + hoy.dia + ' de ' + L.nombreMes(hoy.mes), s.hoy, 'Hoy nadie cumple años.') +
+        seccion('proximos', 'Próximos 7 días', s.proximos, 'Nadie en los próximos 7 días.') +
+        seccion('resto', 'Resto del mes', s.resto, 'Nadie más este mes.') +
+        seccion('pasaron', 'Ya pasaron', s.pasaron, 'Todavía no ha pasado ninguno.');
+    } else {
+      html += seccion('mes-' + mes, 'Todo el mes', L.listaDelMes(estado.personas, mes), 'Nadie cumple este mes.', true);
+    }
+    if (estado.editor) {
+      html += seccion('retirados', 'Retirados', estado.retirados.slice().sort(function (a, b) { return a.mes - b.mes || a.dia - b.dia; }),
+        'No hay retirados.', false, true);
+    }
+    main.innerHTML = html;
+    var area = $('texto-copiar');
+    if (area) area.select();
+  }
+
+  function seccion(llave, titulo, lista, vacio, abierta, retirados) {
+    var abierto = llave in estado.abiertos ? estado.abiertos[llave] : !!abierta;
+    return '<details data-llave="' + llave + '"' + (llave === 'hoy' ? ' class="hoy"' : '') + (abierto ? ' open' : '') + '>' +
+      '<summary><h2>' + e(titulo) + ' (' + lista.length + ')</h2></summary>' +
+      (lista.length ? lista.map(function (p) { return tarjeta(p, retirados); }).join('') : '<p class="vacio">' + e(vacio) + '</p>') +
+      '</details>';
+  }
+
+  function tarjeta(p, retirado) {
+    var id = e(p.id);
+    var botones = '';
+    if (estado.editor) {
+      if (retirado) {
+        botones = '<div class="botones"><button class="accion" type="button" data-accion="restaurar" data-id="' + id + '">Devolver</button></div>';
+      } else if (estado.confirmar === p.id) {
+        botones = '<div class="botones"><span>¿Quitar a ' + e(p.nombre) + '?</span>' +
+          '<button class="accion peligro" type="button" data-accion="quitar" data-id="' + id + '">Sí, quitar</button>' +
+          '<button class="accion" type="button" data-accion="no-quitar">No</button></div>';
+      } else {
+        botones = '<div class="botones"><button class="accion" type="button" data-accion="editar" data-id="' + id + '">Editar</button>' +
+          '<button class="accion peligro" type="button" data-accion="pedir-quitar" data-id="' + id + '">Quitar</button></div>';
+      }
+    }
+    return '<div class="persona"><div class="fecha">' + String(p.dia).padStart(2, '0') +
+      '<small>' + L.nombreMes(p.mes).slice(0, 3) + '</small></div><div class="quien"><b>' + e(p.nombre) + '</b>' +
+      (p.detalle ? '<div class="detalle">' + e(p.detalle) + '</div>' : '') + botones + '</div></div>';
+  }
+
+  function formulario() {
+    var f = estado.formulario;
+    var dias = '', meses = '';
+    for (var d = 1; d <= 31; d++) dias += '<option' + (d === Number(f.dia) ? ' selected' : '') + '>' + d + '</option>';
+    for (var m = 1; m <= 12; m++) {
+      meses += '<option value="' + m + '"' + (m === Number(f.mes) ? ' selected' : '') + '>' + L.nombreMes(m) + '</option>';
+    }
+    var parecidos = '';
+    if (f.parecidos) {
+      parecidos = '<div class="aviso">Ya hay alguien con un nombre parecido:<ul>' +
+        f.parecidos.map(function (p) { return '<li>' + e(L.lineaPersona(p)) + '</li>'; }).join('') +
+        '</ul><button class="accion principal" type="button" data-accion="forzar">Sí, es otra persona: agregar</button></div>';
+    }
+    return '<form class="panel" id="form-persona"><h2>' + (f.id ? 'Editar' : 'Agregar persona') + '</h2>' +
+      '<label for="f-nombre">Nombre</label><input id="f-nombre" maxlength="120" required value="' + e(f.nombre) + '">' +
+      '<label for="f-detalle">Cargo o de dónde es (opcional)</label><input id="f-detalle" maxlength="120" placeholder="Ej: Edil Comuna 1" value="' + e(f.detalle) + '">' +
+      '<div class="fila"><div><label for="f-dia">Día</label><select id="f-dia">' + dias + '</select></div>' +
+      '<div><label for="f-mes">Mes</label><select id="f-mes">' + meses + '</select></div></div>' +
+      (f.error ? '<p class="error">' + e(f.error) + '</p>' : '') + parecidos +
+      '<div class="botones"><button class="accion principal" type="submit"' + (estado.ocupado ? ' disabled' : '') + '>' +
+      (estado.ocupado ? 'Guardando…' : 'Guardar') + '</button>' +
+      '<button class="accion" type="button" data-accion="cancelar">Cancelar</button></div></form>';
+  }
+
+  // ---------- Acciones ----------
+
+  function leerFormulario() {
+    var f = estado.formulario;
+    f.nombre = $('f-nombre').value;
+    f.detalle = $('f-detalle').value;
+    f.dia = Number($('f-dia').value);
+    f.mes = Number($('f-mes').value);
+    return { id: f.id, nombre: f.nombre.trim(), detalle: f.detalle.trim(), dia: f.dia, mes: f.mes };
+  }
+
+  function guardarPersona(forzar) {
+    var p = leerFormulario();
+    var f = estado.formulario;
+    var maximo = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][p.mes - 1];
+    if (!p.nombre) { f.error = 'Falta el nombre.'; return pintar(); }
+    if (p.dia > maximo) { f.error = 'En ' + L.nombreMes(p.mes) + ' no hay día ' + p.dia + '.'; return pintar(); }
+    estado.ocupado = true;
+    pintar();
+    enviar(p.id ? 'editar' : 'agregar', p, forzar).then(function (r) {
+      estado.ocupado = false;
+      if (r.ok) {
+        estado.formulario = null;
+        estado.mes = p.mes;
+        avisar((p.id ? 'Cambios guardados: ' : 'Agregado: ') + L.lineaPersona(p));
+        return r.demo ? pintar() : cargar();
+      }
+      if (r.error === 'clave') { olvidarClave(); clave = ''; return pantallaClave('Tu clave ya no sirve.'); }
+      f.parecidos = r.error === 'parecido' ? r.parecidos : null;
+      f.error = r.error === 'parecido' ? '' : (r.mensaje || 'No se pudo guardar.');
+      pintar();
+    }).catch(function () {
+      estado.ocupado = false;
+      f.error = 'No se pudo conectar. Intenta de nuevo.';
+      pintar();
+    });
+  }
+
+  function cambiarEstado(accion, id) {
+    var p = estado.personas.concat(estado.retirados).find(function (x) { return x.id === id; });
+    if (!p) return;
+    enviar(accion, { id: id }).then(function (r) {
+      estado.confirmar = null;
+      if (!r.ok) { avisar('No se pudo: ' + (r.mensaje || r.error)); return pintar(); }
+      avisar((accion === 'quitar' ? 'Quitado (está en Retirados): ' : 'Devuelto: ') + p.nombre);
+      return r.demo ? pintar() : cargar();
+    }).catch(function () { avisar('No se pudo conectar. Intenta de nuevo.'); pintar(); });
+  }
+
+  function avisar(texto) {
+    estado.aviso = texto;
+    estado.copiar = null;
+  }
+
+  function copiar() {
+    var texto = L.textoCopiar(estado.mes, estado.personas);
+    var listo = function () { avisar('Lista de ' + L.nombreMes(estado.mes) + ' copiada. Pégala en WhatsApp.'); pintar(); };
+    var aMano = function () { estado.aviso = ''; estado.copiar = texto; pintar(); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(texto).then(listo, aMano);
+    else aMano();
+  }
+
+  document.addEventListener('click', function (ev) {
+    var b = ev.target.closest('[data-accion]');
+    if (!b) return;
+    var accion = b.getAttribute('data-accion');
+    var id = b.getAttribute('data-id');
+    if (accion === 'mes') {
+      estado.mes = Number(b.getAttribute('data-mes'));
+      estado.aviso = '';
+      estado.copiar = null;
+      return pintar();
+    }
+    if (accion === 'reintentar') return cargar();
+    if (accion === 'copiar') return copiar();
+    if (accion === 'nuevo') {
+      estado.formulario = { nombre: '', detalle: '', dia: estado.hoy.dia, mes: estado.mes };
+      return pintar();
+    }
+    if (accion === 'editar') {
+      var p = estado.personas.find(function (x) { return x.id === id; });
+      estado.formulario = { id: p.id, nombre: p.nombre, detalle: p.detalle, dia: p.dia, mes: p.mes };
+      window.scrollTo(0, 0);
+      return pintar();
+    }
+    if (accion === 'cancelar') { estado.formulario = null; return pintar(); }
+    if (accion === 'forzar') return guardarPersona(true);
+    if (accion === 'pedir-quitar') { estado.confirmar = id; return pintar(); }
+    if (accion === 'no-quitar') { estado.confirmar = null; return pintar(); }
+    if (accion === 'quitar' || accion === 'restaurar') return cambiarEstado(accion, id);
+  });
+
+  document.addEventListener('submit', function (ev) {
+    if (ev.target.id !== 'form-persona') return;
+    ev.preventDefault();
+    if (!estado.ocupado) guardarPersona(false);
+  });
+
+  // Recordar qué secciones están abiertas al volver a pintar.
+  document.addEventListener('toggle', function (ev) {
+    var llave = ev.target.getAttribute && ev.target.getAttribute('data-llave');
+    if (llave) estado.abiertos[llave] = ev.target.open;
+  }, true);
+
+  $('salir').addEventListener('click', function () {
+    olvidarClave();
+    clave = '';
+    estado.editor = false;
+    pantallaClave('');
+  });
+
+  if (DEMO || clave) cargar();
+  else pantallaClave('');
+})();

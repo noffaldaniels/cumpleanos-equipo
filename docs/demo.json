@@ -1,0 +1,17 @@
+{
+  "ok": true,
+  "editor": true,
+  "personas": [
+    { "id": "p0001", "nombre": "Ana Prueba", "detalle": "Edil Comuna 4", "dia": 18, "mes": 10 },
+    { "id": "p0002", "nombre": "Beto Ejemplo", "detalle": "Periodista", "dia": 20, "mes": 10 },
+    { "id": "p0003", "nombre": "Carla Inventada", "detalle": "", "dia": 23, "mes": 10 },
+    { "id": "p0004", "nombre": "Dora Modelo", "detalle": "Líder · Guamo", "dia": 2, "mes": 10 },
+    { "id": "p0005", "nombre": "Eduardo Ficticio", "detalle": "Concejal Lérida", "dia": 30, "mes": 10 },
+    { "id": "p0006", "nombre": "Fabiola Demo", "detalle": "Comuna 12", "dia": 1, "mes": 11 },
+    { "id": "p0007", "nombre": "Gabriel Bisiesto", "detalle": "", "dia": 29, "mes": 2 },
+    { "id": "p0008", "nombre": "<b>Hugo</b> Raro", "detalle": "<i>Comuna</i> & 'Sur'", "dia": 9, "mes": 12 }
+  ],
+  "retirados": [
+    { "id": "p0009", "nombre": "Irene Retirada", "detalle": "Equipo", "dia": 5, "mes": 11 }
+  ]
+}
