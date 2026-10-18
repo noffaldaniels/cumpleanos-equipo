@@ -37,7 +37,7 @@ test('validarPersona', () => {
 });
 
 test('sonParecidos (misma regla que la limpieza)', () => {
-  assert.ok(S.sonParecidos('Sandra Gómez', 'SANDRA MILENA GOMEZ CALVERA'));
+  assert.ok(S.sonParecidos('Rosa Ejemplo', 'ROSA MARIA EJEMPLO SOL'));
   assert.ok(S.sonParecidos('Ana Prueba', 'ana prueba'));
   assert.ok(S.sonParecidos('Jhon Fredy Prueba', 'John Fredy Prueba'));
   assert.ok(!S.sonParecidos('Ana Prueba', 'Luis Prueba'));
