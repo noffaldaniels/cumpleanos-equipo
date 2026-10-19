@@ -58,6 +58,11 @@ function almacenHoja_() {
   };
 }
 
+// Ejecutar a mano una vez desde el editor si Google no pidió el permiso de Drive.
+function autorizarDrive() {
+  return DriveApp.getRootFolder().getName();
+}
+
 function fotosDrive_() {
   var props = PropertiesService.getScriptProperties();
   function carpeta() {
