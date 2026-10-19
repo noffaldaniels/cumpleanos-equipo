@@ -45,9 +45,9 @@ test('sonParecidos (misma regla que la limpieza)', () => {
 });
 
 test('fila y persona ida y vuelta', () => {
-  const fila = ['p0001', 'Ana Prueba', 'Edil', 5, 11, 'activo', 'x', '2026-10-01'];
+  const fila = ['p0001', 'Ana Prueba', 'Edil', 5, 11, 'activo', 'x', '2026-10-01', ''];
   const p = S.filaAPersona(fila);
-  assert.deepEqual(p, { id: 'p0001', nombre: 'Ana Prueba', detalle: 'Edil', dia: 5, mes: 11, estado: 'activo', fuente: 'x', agregado: '2026-10-01' });
+  assert.deepEqual(p, { id: 'p0001', nombre: 'Ana Prueba', detalle: 'Edil', dia: 5, mes: 11, estado: 'activo', fuente: 'x', agregado: '2026-10-01', foto: '' });
   assert.deepEqual(S.personaAFila(p), fila);
   assert.equal(S.filaAPersona(['p9', 'X', '', '5', '11', 'activo', '', '']).dia, 5);
 });
@@ -85,7 +85,7 @@ test('agregar: id nuevo, fecha de hoy, activo', () => {
   const r = S.procesar({ accion: 'agregar', clave: 'editor456', persona: { nombre: ' Eva Nueva ', detalle: 'Líder', dia: 3, mes: 1 } }, PROPS, a, HOY);
   assert.equal(r.ok, true);
   assert.deepEqual(r.persona, { id: 'p0003', nombre: 'Eva Nueva', detalle: 'Líder', dia: 3, mes: 1 });
-  assert.deepEqual(a.filas[2], ['p0003', 'Eva Nueva', 'Líder', 3, 1, 'activo', 'página', HOY]);
+  assert.deepEqual(a.filas[2], ['p0003', 'Eva Nueva', 'Líder', 3, 1, 'activo', 'página', HOY, '']);
 });
 
 test('agregar parecido a un activo avisa, y con forzar entra', () => {
@@ -110,7 +110,7 @@ test('editar cambia nombre, detalle y fecha sin tocar id, estado ni fuente', () 
   const a = base();
   const r = S.procesar({ accion: 'editar', clave: 'editor456', persona: { id: 'p0001', nombre: 'Ana María Prueba', detalle: 'Edil Comuna 4', dia: 6, mes: 11 } }, PROPS, a, HOY);
   assert.equal(r.ok, true);
-  assert.deepEqual(a.filas[0], ['p0001', 'Ana María Prueba', 'Edil Comuna 4', 6, 11, 'activo', 'x', '2026-10-01']);
+  assert.deepEqual(a.filas[0], ['p0001', 'Ana María Prueba', 'Edil Comuna 4', 6, 11, 'activo', 'x', '2026-10-01', '']);
 });
 
 test('quitar y restaurar', () => {
@@ -157,4 +157,55 @@ test('una fila dañada en la hoja no rompe la lista', () => {
   ]);
   const r = S.procesar({ accion: 'lista', clave: 'equipo123' }, PROPS, a, HOY);
   assert.deepEqual(r.personas.map((p) => p.id), ['p0001']);
+});
+
+// ---------- Fotos ----------
+
+const JPG = '/9j/' + 'A'.repeat(40);
+function fotos() {
+  return {
+    archivos: {}, n: 0, borrados: [],
+    guardar(b64, nombre) { const id = 'f' + (++this.n); this.archivos[id] = { b64, nombre }; return id; },
+    leer(id) { return this.archivos[id] ? this.archivos[id].b64 : null; },
+    borrar(id) { this.borrados.push(id); delete this.archivos[id]; },
+  };
+}
+
+test('la clave del equipo sube foto; la lista la marca y se ve grande y en miniatura', () => {
+  const a = base(), f = fotos();
+  const r = S.procesar({ accion: 'subir-foto', clave: 'equipo123', persona: { id: 'p0001' }, foto: JPG, mini: JPG + 'B' }, PROPS, a, HOY, f);
+  assert.equal(r.ok, true);
+  assert.equal(a.filas[0][8], 'f1|f2');
+  assert.equal(S.procesar({ accion: 'lista', clave: 'equipo123' }, PROPS, a, HOY, f).personas[0].foto, true);
+  assert.deepEqual(S.procesar({ accion: 'minis', clave: 'equipo123', ids: 'p0001,p0002,nadie' }, PROPS, a, HOY, f).minis, { p0001: JPG + 'B' });
+  assert.equal(S.procesar({ accion: 'ver-foto', clave: 'equipo123', id: 'p0001' }, PROPS, a, HOY, f).foto, JPG);
+});
+
+test('cambiar foto borra la anterior; quitar foto es solo del editor', () => {
+  const a = base(), f = fotos();
+  S.procesar({ accion: 'subir-foto', clave: 'editor456', persona: { id: 'p0001' }, foto: JPG, mini: JPG }, PROPS, a, HOY, f);
+  S.procesar({ accion: 'subir-foto', clave: 'editor456', persona: { id: 'p0001' }, foto: JPG, mini: JPG }, PROPS, a, HOY, f);
+  assert.deepEqual(f.borrados, ['f1', 'f2']);
+  assert.equal(S.procesar({ accion: 'quitar-foto', clave: 'equipo123', persona: { id: 'p0001' } }, PROPS, a, HOY, f).error, 'clave');
+  assert.equal(S.procesar({ accion: 'quitar-foto', clave: 'editor456', persona: { id: 'p0001' } }, PROPS, a, HOY, f).ok, true);
+  assert.equal(a.filas[0][8], '');
+  assert.deepEqual(f.borrados, ['f1', 'f2', 'f3', 'f4']);
+});
+
+test('fotos: rechaza lo que no es JPEG, lo muy pesado, retirados y claves malas', () => {
+  const f = fotos();
+  const subir = (extra) => S.procesar(Object.assign({ accion: 'subir-foto', clave: 'equipo123', persona: { id: 'p0001' }, foto: JPG, mini: JPG }, extra), PROPS, base(), HOY, f);
+  assert.equal(subir({ foto: 'iVBORw0KGgo=' }).ok, false);
+  assert.equal(subir({ foto: '/9j/<script>' }).ok, false);
+  assert.equal(subir({ foto: '/9j/' + 'A'.repeat(4000000) }).ok, false);
+  assert.equal(subir({ persona: { id: 'p0002' } }).ok, false); // retirado
+  assert.equal(subir({ clave: 'mala' }).error, 'clave');
+  assert.equal(Object.keys(f.archivos).length, 0);
+});
+
+test('al subir la primera foto la hoja gana el título de la columna "foto"', () => {
+  const a = almacen([S.COLUMNAS.slice(0, 8), ['p0001', 'Ana Prueba', 'Edil', 5, 11, 'activo', 'x', '2026-10-01']]);
+  S.procesar({ accion: 'subir-foto', clave: 'equipo123', persona: { id: 'p0001' }, foto: JPG, mini: JPG }, PROPS, a, HOY, fotos());
+  assert.equal(a.filas[0][8], 'foto');
+  assert.equal(a.filas[1][8], 'f1|f2');
 });

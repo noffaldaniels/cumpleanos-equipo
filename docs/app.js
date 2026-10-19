@@ -9,7 +9,9 @@
   var estado = {
     personas: [], retirados: [], editor: false, hoy: L.hoyColombia(new Date()), mes: null,
     abiertos: { hoy: true, proximos: true }, formulario: null, confirmar: null, aviso: '', copiar: null, ocupado: false,
+    minis: {}, pidiendo: {}, grandes: {}, verFoto: null, fotoPara: null, demoFotos: {},
   };
+  var JPG = 'data:image/jpeg;base64,';
 
   function leerClave() { try { return localStorage.getItem(LLAVE) || ''; } catch (x) { return ''; } }
   function guardarClave(c) { try { localStorage.setItem(LLAVE, c); } catch (x) { /* sin memoria: se pedirá otra vez */ } }
@@ -26,17 +28,32 @@
     return fetch(URL_SERVIDOR + '?accion=lista&clave=' + encodeURIComponent(clave)).then(function (r) { return r.json(); });
   }
 
-  function enviar(accion, persona, forzar) {
-    if (DEMO) return Promise.resolve(simular(accion, persona, forzar));
+  function enviar(accion, persona, forzar, extra) {
+    if (DEMO) return Promise.resolve(simular(accion, persona, forzar, extra));
+    var cuerpo = { clave: clave, accion: accion, persona: persona, forzar: !!forzar };
+    for (var k in extra || {}) cuerpo[k] = extra[k];
     return fetch(URL_SERVIDOR, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // sin "preflight" de CORS
-      body: JSON.stringify({ clave: clave, accion: accion, persona: persona, forzar: !!forzar }),
+      body: JSON.stringify(cuerpo),
     }).then(function (r) { return r.json(); });
   }
 
+  function pedirFotos(accion, parametros) {
+    if (DEMO) {
+      var f = estado.demoFotos;
+      if (accion === 'ver-foto') return Promise.resolve(f[parametros.id] ? { ok: true, foto: f[parametros.id].foto } : { ok: false });
+      var minis = {};
+      parametros.ids.split(',').forEach(function (id) { if (f[id]) minis[id] = f[id].mini; });
+      return Promise.resolve({ ok: true, minis: minis });
+    }
+    var url = URL_SERVIDOR + '?accion=' + accion + '&clave=' + encodeURIComponent(clave);
+    for (var k in parametros) url += '&' + k + '=' + encodeURIComponent(parametros[k]);
+    return fetch(url).then(function (r) { return r.json(); });
+  }
+
   // En ?demo=1 los cambios quedan solo en esta pantalla.
-  function simular(accion, persona, forzar) {
+  function simular(accion, persona, forzar, extra) {
     var todos = estado.personas.concat(estado.retirados);
     var buscar = function (lista) { return lista.findIndex(function (p) { return p.id === persona.id; }); };
     if (accion === 'agregar') {
@@ -49,6 +66,10 @@
       estado.retirados.push(estado.personas.splice(buscar(estado.personas), 1)[0]);
     } else if (accion === 'restaurar') {
       estado.personas.push(estado.retirados.splice(buscar(estado.retirados), 1)[0]);
+    } else if (accion === 'subir-foto') {
+      estado.demoFotos[persona.id] = { foto: extra.foto, mini: extra.mini };
+    } else if (accion === 'quitar-foto') {
+      delete estado.demoFotos[persona.id];
     }
     return { ok: true, demo: true };
   }
@@ -127,6 +148,7 @@
         '<textarea id="texto-copiar" readonly>' + e(estado.copiar) + '</textarea></div>';
     }
     if (estado.formulario) html += formulario();
+    if (estado.verFoto) html += visor();
 
     if (mes === hoy.mes) {
       var s = L.seccionesDelMes(estado.personas, hoy);
@@ -144,6 +166,7 @@
     main.innerHTML = html;
     var area = $('texto-copiar');
     if (area) area.select();
+    cargarMinis();
   }
 
   function seccion(llave, titulo, lista, vacio, abierta, retirados) {
@@ -170,8 +193,135 @@
       }
     }
     return '<div class="persona"><div class="fecha">' + String(p.dia).padStart(2, '0') +
-      '<small>' + L.nombreMes(p.mes).slice(0, 3) + '</small></div><div class="quien"><b>' + e(p.nombre) + '</b>' +
+      '<small>' + L.nombreMes(p.mes).slice(0, 3) + '</small></div>' + (retirado ? '' : avatar(p)) +
+      '<div class="quien"><b>' + e(p.nombre) + '</b>' +
       (p.detalle ? '<div class="detalle">' + e(p.detalle) + '</div>' : '') + botones + '</div></div>';
+  }
+
+  // ---------- Fotos ----------
+
+  function avatar(p) {
+    var id = e(p.id);
+    if (estado.fotoPara === p.id && estado.ocupado) return '<span class="av cargando">Subiendo…</span>';
+    if (!p.foto) return '<button class="av sin" type="button" data-accion="subir-foto" data-id="' + id + '">Subir<br>foto</button>';
+    var mini = estado.minis[p.id];
+    return '<button class="av" type="button" data-accion="ver-foto" data-id="' + id + '" aria-label="Ver foto de ' + e(p.nombre) + '">' +
+      (mini ? '<img src="' + mini + '" alt="">' : '') + '</button>';
+  }
+
+  // Las miniaturas se piden solo para el mes que se está mirando.
+  function cargarMinis() {
+    var ids = estado.personas.filter(function (p) {
+      return p.mes === estado.mes && p.foto && !estado.minis[p.id] && !estado.pidiendo[p.id];
+    }).map(function (p) { return p.id; });
+    if (!ids.length) return;
+    ids.forEach(function (id) { estado.pidiendo[id] = true; });
+    pedirFotos('minis', { ids: ids.join(',') }).then(function (r) {
+      for (var id in (r.ok && r.minis) || {}) estado.minis[id] = JPG + r.minis[id];
+      if (r.ok) pintar();
+    }).catch(function () {
+      ids.forEach(function (id) { delete estado.pidiendo[id]; });
+    });
+  }
+
+  function visor() {
+    var v = estado.verFoto;
+    var p = estado.personas.find(function (x) { return x.id === v.id; });
+    if (!p) return '';
+    var id = e(p.id);
+    var grande = estado.grandes[p.id];
+    return '<div class="visor" role="dialog" aria-label="Foto de ' + e(p.nombre) + '"><div class="panel">' +
+      '<h2>' + e(p.nombre) + '</h2>' +
+      (grande ? '<img class="grande" src="' + grande + '" alt="Foto de ' + e(p.nombre) + '">'
+        : '<p class="vacio">' + (v.error ? e(v.error) : 'Cargando la foto…') + '</p>') +
+      '<div class="botones">' +
+      (grande ? '<a class="accion principal" download="Cumple ' + e(p.nombre) + '.jpg" href="' + grande + '">⬇ Descargar</a>' : '') +
+      '<button class="accion" type="button" data-accion="subir-foto" data-id="' + id + '">📷 Cambiar foto</button>' +
+      (estado.editor ? '<button class="accion peligro" type="button" data-accion="quitar-foto" data-id="' + id + '">Quitar foto</button>' : '') +
+      '<button class="accion" type="button" data-accion="cerrar-foto">✕ Cerrar</button></div></div></div>';
+  }
+
+  function verFoto(id) {
+    estado.verFoto = { id: id };
+    pintar();
+    if (estado.grandes[id]) return;
+    pedirFotos('ver-foto', { id: id }).then(function (r) {
+      if (r.ok) estado.grandes[id] = JPG + r.foto;
+      else if (estado.verFoto) estado.verFoto.error = r.mensaje || 'No se pudo abrir la foto.';
+      pintar();
+    }).catch(function () {
+      if (estado.verFoto) estado.verFoto.error = 'No se pudo conectar. Intenta de nuevo.';
+      pintar();
+    });
+  }
+
+  // El celular achica la foto antes de subirla: grande (máx. 1600 px) y miniatura cuadrada de 160 px.
+  function achicar(img, lado, cuadrada) {
+    var w = img.naturalWidth, h = img.naturalHeight, sx = 0, sy = 0, sw = w, sh = h, cw, ch;
+    if (cuadrada) {
+      var m = Math.min(w, h);
+      sx = (w - m) / 2; sy = (h - m) / 2; sw = sh = m;
+      cw = ch = lado;
+    } else {
+      var escala = Math.min(1, lado / Math.max(w, h));
+      cw = Math.round(w * escala); ch = Math.round(h * escala);
+    }
+    var lienzo = document.createElement('canvas');
+    lienzo.width = cw; lienzo.height = ch;
+    var ctx = lienzo.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, cw, ch);
+    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, cw, ch);
+    return lienzo.toDataURL('image/jpeg', cuadrada ? 0.8 : 0.88).slice(JPG.length);
+  }
+
+  function subirFoto(archivo) {
+    var id = estado.fotoPara;
+    var p = estado.personas.find(function (x) { return x.id === id; });
+    if (!p || !archivo) return;
+    var url = URL.createObjectURL(archivo);
+    var img = new Image();
+    img.onerror = function () {
+      URL.revokeObjectURL(url);
+      avisar('Ese archivo no es una foto que se pueda abrir.');
+      pintar();
+    };
+    img.onload = function () {
+      URL.revokeObjectURL(url);
+      var foto = achicar(img, 1600, false), mini = achicar(img, 160, true);
+      estado.verFoto = null;
+      estado.ocupado = true;
+      avisar('Subiendo la foto de ' + p.nombre + '…');
+      pintar();
+      enviar('subir-foto', { id: id }, false, { foto: foto, mini: mini }).then(function (r) {
+        estado.ocupado = false;
+        if (r.error === 'clave') { olvidarClave(); clave = ''; return pantallaClave('Tu clave ya no sirve.'); }
+        if (!r.ok) { avisar('No se pudo subir la foto: ' + (r.mensaje || r.error)); return pintar(); }
+        p.foto = true;
+        estado.minis[id] = JPG + mini;
+        estado.grandes[id] = JPG + foto;
+        avisar('Foto guardada: ' + p.nombre);
+        pintar();
+      }).catch(function () {
+        estado.ocupado = false;
+        avisar('No se pudo conectar. La foto no se subió; intenta de nuevo.');
+        pintar();
+      });
+    };
+    img.src = url;
+  }
+
+  function quitarFoto(id) {
+    var p = estado.personas.find(function (x) { return x.id === id; });
+    enviar('quitar-foto', { id: id }).then(function (r) {
+      if (!r.ok) { avisar('No se pudo: ' + (r.mensaje || r.error)); return pintar(); }
+      p.foto = false;
+      delete estado.minis[id];
+      delete estado.grandes[id];
+      estado.verFoto = null;
+      avisar('Foto quitada: ' + p.nombre);
+      pintar();
+    }).catch(function () { avisar('No se pudo conectar. Intenta de nuevo.'); pintar(); });
   }
 
   function formulario() {
@@ -288,7 +438,19 @@
     if (accion === 'pedir-quitar') { estado.confirmar = id; return pintar(); }
     if (accion === 'no-quitar') { estado.confirmar = null; return pintar(); }
     if (accion === 'quitar' || accion === 'restaurar') return cambiarEstado(accion, id);
+    if (accion === 'ver-foto') return verFoto(id);
+    if (accion === 'cerrar-foto') { estado.verFoto = null; return pintar(); }
+    if (accion === 'quitar-foto') return quitarFoto(id);
+    if (accion === 'subir-foto') {
+      if (estado.ocupado) return;
+      estado.fotoPara = id;
+      var elegir = $('archivo-foto');
+      elegir.value = '';
+      return elegir.click();
+    }
   });
+
+  $('archivo-foto').addEventListener('change', function (ev) { subirFoto(ev.target.files[0]); });
 
   document.addEventListener('submit', function (ev) {
     if (ev.target.id !== 'form-persona') return;

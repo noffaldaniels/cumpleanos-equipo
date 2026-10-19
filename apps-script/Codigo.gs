@@ -2,18 +2,23 @@
  * Cumpleaños · Oficina del Diputado Felipe Ferro
  * Servidor: va pegado a la hoja "Cumpleaños Equipo Ferro" (pestaña "personas").
  * Las claves NO van aquí: Configuración del proyecto → Propiedades del script →
- * CLAVE_EQUIPO (mirar) y CLAVE_EDITOR (editar).
+ * CLAVE_EQUIPO (mirar y subir fotos) y CLAVE_EDITOR (editar).
+ * Las fotos van en la carpeta privada "Fotos cumpleaños (privado)" del Drive de Noffal;
+ * la columna "foto" de la hoja guarda los códigos de los dos archivos (grande|mini).
  */
 
-var COLUMNAS = ['id', 'nombre', 'detalle', 'dia', 'mes', 'estado', 'fuente', 'agregado'];
+var COLUMNAS = ['id', 'nombre', 'detalle', 'dia', 'mes', 'estado', 'fuente', 'agregado', 'foto'];
 var DIAS_POR_MES = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 var LARGO_MAXIMO = 120;
+var FOTO_MAXIMA = 4000000; // caracteres en base64 (~3 MB): el celular la achica antes de subirla
+var MINI_MAXIMA = 100000;
+var MINIS_POR_PEDIDO = 60;
 
 // ---------- Apps Script ----------
 
 function doGet(e) {
   var p = (e && e.parameter) || {};
-  return responder_(procesar({ accion: p.accion, clave: p.clave }, propiedades_(), almacenHoja_(), hoy_()));
+  return responder_(procesar({ accion: p.accion, clave: p.clave, id: p.id, ids: p.ids }, propiedades_(), almacenHoja_(), hoy_(), fotosDrive_()));
 }
 
 function doPost(e) {
@@ -26,7 +31,7 @@ function doPost(e) {
   var candado = LockService.getScriptLock();
   candado.waitLock(10000);
   try {
-    return responder_(procesar(peticion, propiedades_(), almacenHoja_(), hoy_()));
+    return responder_(procesar(peticion, propiedades_(), almacenHoja_(), hoy_(), fotosDrive_()));
   } finally {
     candado.releaseLock();
   }
@@ -50,6 +55,31 @@ function almacenHoja_() {
     leer: function () { return hoja.getDataRange().getValues(); },
     agregarFila: function (f) { hoja.appendRow(f); },
     cambiarFila: function (i, f) { hoja.getRange(i + 1, 1, 1, f.length).setValues([f]); },
+  };
+}
+
+function fotosDrive_() {
+  var props = PropertiesService.getScriptProperties();
+  function carpeta() {
+    var id = props.getProperty('CARPETA_FOTOS');
+    if (id) {
+      try { return DriveApp.getFolderById(id); } catch (err) { /* la borraron: se crea otra */ }
+    }
+    var nueva = DriveApp.createFolder('Fotos cumpleaños (privado)');
+    props.setProperty('CARPETA_FOTOS', nueva.getId());
+    return nueva;
+  }
+  return {
+    guardar: function (base64, nombre) {
+      var blob = Utilities.newBlob(Utilities.base64Decode(base64), 'image/jpeg', nombre);
+      return carpeta().createFile(blob).getId();
+    },
+    leer: function (idArchivo) {
+      try { return Utilities.base64Encode(DriveApp.getFileById(idArchivo).getBlob().getBytes()); } catch (err) { return null; }
+    },
+    borrar: function (idArchivo) {
+      try { DriveApp.getFileById(idArchivo).setTrashed(true); } catch (err) { /* ya no estaba */ }
+    },
   };
 }
 
@@ -107,15 +137,29 @@ function filaAPersona(f) {
   return {
     id: String(f[0]), nombre: String(f[1]), detalle: String(f[2] || ''),
     dia: Number(f[3]), mes: Number(f[4]), estado: String(f[5]), fuente: String(f[6] || ''), agregado: f[7],
+    foto: String(f[8] || ''),
   };
 }
 
 function personaAFila(p) {
-  return [p.id, texto_(p.nombre), texto_(p.detalle), p.dia, p.mes, p.estado, p.fuente, p.agregado];
+  return [p.id, texto_(p.nombre), texto_(p.detalle), p.dia, p.mes, p.estado, p.fuente, p.agregado, p.foto || ''];
 }
 
 function publica_(p) {
-  return { id: p.id, nombre: p.nombre, detalle: p.detalle, dia: p.dia, mes: p.mes };
+  var r = { id: p.id, nombre: p.nombre, detalle: p.detalle, dia: p.dia, mes: p.mes };
+  if (p.foto) r.foto = true;
+  return r;
+}
+
+// "grande|mini" → códigos de los archivos en Drive
+function archivosFoto_(p) {
+  var partes = String(p.foto || '').split('|');
+  return { grande: partes[0] || '', mini: partes[1] || '' };
+}
+
+function esJpeg_(base64, maximo) {
+  return typeof base64 === 'string' && base64.length <= maximo && base64.slice(0, 4) === '/9j/' &&
+    /^[A-Za-z0-9+\/]+={0,2}$/.test(base64);
 }
 
 // Un texto que empieza con = + @ la hoja lo tomaría como fórmula.
@@ -124,7 +168,7 @@ function texto_(v) {
   return /^[=+@]/.test(t) ? "'" + t : t;
 }
 
-function procesar(peticion, props, almacen, hoy) {
+function procesar(peticion, props, almacen, hoy, fotos) {
   peticion = peticion || {};
   var rol = revisarClave(peticion.clave, props);
   if (!rol) return { ok: false, error: 'clave' };
@@ -148,8 +192,51 @@ function procesar(peticion, props, almacen, hoy) {
     return r;
   }
 
+  var buscar = function (id) { return activos.filter(function (x) { return x.p.id === id; })[0]; };
+
+  // Fotos: las ven y las suben las dos claves (pedido de Noffal, 19-oct).
+  if (peticion.accion === 'minis') {
+    var minis = {};
+    String(peticion.ids || '').split(',').slice(0, MINIS_POR_PEDIDO).forEach(function (id) {
+      var x = buscar(id);
+      var datos = x && archivosFoto_(x.p).mini ? fotos.leer(archivosFoto_(x.p).mini) : null;
+      if (datos) minis[id] = datos;
+    });
+    return { ok: true, minis: minis };
+  }
+  if (peticion.accion === 'ver-foto') {
+    var vista = buscar(peticion.id);
+    var grande = vista && archivosFoto_(vista.p).grande ? fotos.leer(archivosFoto_(vista.p).grande) : null;
+    return grande ? { ok: true, foto: grande } : { ok: false, error: 'datos', mensaje: 'Esa persona no tiene foto' };
+  }
+  if (peticion.accion === 'subir-foto') {
+    var conFoto = buscar((peticion.persona || {}).id);
+    if (!conFoto) return { ok: false, error: 'datos', mensaje: 'No encontré a esa persona' };
+    if (!esJpeg_(peticion.foto, FOTO_MAXIMA) || !esJpeg_(peticion.mini, MINI_MAXIMA)) {
+      return { ok: false, error: 'datos', mensaje: 'La foto no sirve o es muy pesada' };
+    }
+    var antes = archivosFoto_(conFoto.p);
+    conFoto.p.foto = fotos.guardar(peticion.foto, conFoto.p.id + '.jpg') + '|' + fotos.guardar(peticion.mini, conFoto.p.id + '-mini.jpg');
+    if (inicio && filas[0][8] !== 'foto') almacen.cambiarFila(0, COLUMNAS); // título de la columna nueva
+    almacen.cambiarFila(conFoto.fila, personaAFila(conFoto.p));
+    if (antes.grande) fotos.borrar(antes.grande);
+    if (antes.mini) fotos.borrar(antes.mini);
+    return { ok: true, persona: publica_(conFoto.p) };
+  }
+
   if (rol !== 'editor') return { ok: false, error: 'clave' };
   var dato = peticion.persona || {};
+
+  if (peticion.accion === 'quitar-foto') {
+    var sinFoto = buscar(dato.id);
+    if (!sinFoto) return { ok: false, error: 'datos', mensaje: 'No encontré a esa persona' };
+    var viejos = archivosFoto_(sinFoto.p);
+    sinFoto.p.foto = '';
+    almacen.cambiarFila(sinFoto.fila, personaAFila(sinFoto.p));
+    if (viejos.grande) fotos.borrar(viejos.grande);
+    if (viejos.mini) fotos.borrar(viejos.mini);
+    return { ok: true, persona: publica_(sinFoto.p) };
+  }
 
   if (peticion.accion === 'agregar') {
     if (validarPersona(dato)) return { ok: false, error: 'datos', mensaje: validarPersona(dato) };
