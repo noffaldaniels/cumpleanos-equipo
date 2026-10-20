@@ -77,6 +77,20 @@
     return [titulo].concat(listaDelMes(personas, mes).map(lineaPersona)).join('\n');
   }
 
+  function sinTildes(texto) {
+    return String(texto || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  }
+
+  // Cada palabra escrita debe aparecer en el nombre o el cargo.
+  function buscar(personas, texto) {
+    var palabras = sinTildes(texto).split(/\s+/).filter(Boolean);
+    if (!palabras.length) return [];
+    return personas.filter(function (p) {
+      var donde = sinTildes(p.nombre + ' ' + (p.detalle || ''));
+      return palabras.every(function (w) { return donde.indexOf(w) !== -1; });
+    }).sort(porNombre);
+  }
+
   function escapar(texto) {
     return String(texto == null ? '' : texto).replace(/[&<>"']/g, function (c) {
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
@@ -86,7 +100,7 @@
   var Logica = {
     MESES: MESES, hoyColombia: hoyColombia, seccionesDelMes: seccionesDelMes, listaDelMes: listaDelMes,
     ordenPestanas: ordenPestanas, nombreMes: nombreMes, lineaPersona: lineaPersona, textoCopiar: textoCopiar,
-    escapar: escapar,
+    escapar: escapar, buscar: buscar,
   };
   if (typeof module !== 'undefined') module.exports = Logica;
   else raiz.Logica = Logica;

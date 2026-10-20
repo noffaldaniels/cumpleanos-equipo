@@ -61,3 +61,13 @@ test('escapar', () => {
   assert.equal(L.escapar('<b>"Ana" & \'Beto\'</b>'), '&lt;b&gt;&quot;Ana&quot; &amp; &#39;Beto&#39;&lt;/b&gt;');
   assert.equal(L.escapar(undefined), '');
 });
+
+test('buscar por nombre o cargo, sin tildes ni mayúsculas', () => {
+  const gente = [P('Noffal Daniels', 3, 5), P('Ángela Huertas', 1, 12, 'Edil Comuna 1'), P('Ana María', 9, 2), P('Mario López', 4, 4)];
+  assert.deepEqual(nombres(L.buscar(gente, 'noffal')), ['Noffal Daniels']);
+  assert.deepEqual(nombres(L.buscar(gente, 'ANGELA')), ['Ángela Huertas']);
+  assert.deepEqual(nombres(L.buscar(gente, 'edil')), ['Ángela Huertas']);
+  assert.deepEqual(nombres(L.buscar(gente, 'ma lo')), ['Mario López']);
+  assert.deepEqual(nombres(L.buscar(gente, 'ma')), ['Ana María', 'Mario López']);
+  assert.deepEqual(L.buscar(gente, '   '), []);
+});

@@ -9,7 +9,7 @@
   var estado = {
     personas: [], retirados: [], editor: false, hoy: L.hoyColombia(new Date()), mes: null,
     abiertos: { hoy: true, proximos: true }, formulario: null, confirmar: null, aviso: '', copiar: null, ocupado: false,
-    minis: {}, pidiendo: {}, grandes: {}, verFoto: null, fotoPara: null, demoFotos: {},
+    minis: {}, pidiendo: {}, grandes: {}, verFoto: null, fotoPara: null, demoFotos: {}, busqueda: '',
   };
   var JPG = 'data:image/jpeg;base64,';
 
@@ -95,6 +95,7 @@
   // ---------- Pantallas ----------
 
   function pantallaClave(mensaje) {
+    $('buscador').classList.add('oculto');
     $('meses').classList.add('oculto');
     $('pie').classList.add('oculto');
     main.innerHTML =
@@ -134,8 +135,11 @@
         nombre.charAt(0).toUpperCase() + nombre.slice(1) + ' · ' + contarMes(m) + '</button>';
     }).join('');
     nav.classList.remove('oculto');
+    $('buscador').classList.remove('oculto');
+    $('borrar-busqueda').classList.toggle('oculto', !estado.busqueda);
     $('pie').classList.toggle('oculto', DEMO);
 
+    if (estado.busqueda.trim()) return pintarBusqueda();
     var mes = estado.mes;
     var titulo = L.nombreMes(mes).charAt(0).toUpperCase() + L.nombreMes(mes).slice(1);
     var html = '<div class="barra"><div><h2>' + titulo + '</h2><span class="total">' + contarMes(mes) + ' cumpleaños</span></div><div>' +
@@ -167,6 +171,20 @@
     var area = $('texto-copiar');
     if (area) area.select();
     cargarMinis();
+  }
+
+  // Con algo escrito en el buscador se ve la gente de todos los meses que coincide.
+  function pintarBusqueda() {
+    var lista = L.buscar(estado.personas, estado.busqueda);
+    var html = '<div class="barra"><div><h2>Resultados</h2><span class="total">' + lista.length +
+      (lista.length === 1 ? ' persona' : ' personas') + '</span></div></div>';
+    if (estado.aviso) html += '<p class="aviso">' + e(estado.aviso) + '</p>';
+    if (estado.formulario) html += formulario();
+    if (estado.verFoto) html += visor();
+    html += lista.length ? '<div class="panel">' + lista.map(function (p) { return tarjeta(p); }).join('') + '</div>'
+      : '<p class="vacio">Nadie con «' + e(estado.busqueda.trim()) + '». Revisa cómo está escrito.</p>';
+    main.innerHTML = html;
+    cargarMinis(lista);
   }
 
   function seccion(llave, titulo, lista, vacio, abierta, retirados) {
@@ -209,10 +227,10 @@
       (mini ? '<img src="' + mini + '" alt="">' : '') + '</button>';
   }
 
-  // Las miniaturas se piden solo para el mes que se está mirando.
-  function cargarMinis() {
-    var ids = estado.personas.filter(function (p) {
-      return p.mes === estado.mes && p.foto && !estado.minis[p.id] && !estado.pidiendo[p.id];
+  // Las miniaturas se piden solo para el mes (o la búsqueda) que se está mirando.
+  function cargarMinis(visibles) {
+    var ids = (visibles || estado.personas.filter(function (p) { return p.mes === estado.mes; })).filter(function (p) {
+      return p.foto && !estado.minis[p.id] && !estado.pidiendo[p.id];
     }).map(function (p) { return p.id; });
     if (!ids.length) return;
     ids.forEach(function (id) { estado.pidiendo[id] = true; });
@@ -417,6 +435,8 @@
     var id = b.getAttribute('data-id');
     if (accion === 'mes') {
       estado.mes = Number(b.getAttribute('data-mes'));
+      estado.busqueda = '';
+      $('buscar').value = '';
       estado.aviso = '';
       estado.copiar = null;
       return pintar();
@@ -451,6 +471,21 @@
   });
 
   $('archivo-foto').addEventListener('change', function (ev) { subirFoto(ev.target.files[0]); });
+
+  // El buscador está fuera de <main>: al repintar no se pierde lo que se está escribiendo.
+  $('buscar').addEventListener('input', function (ev) {
+    estado.busqueda = ev.target.value;
+    estado.aviso = '';
+    estado.copiar = null;
+    pintar();
+  });
+
+  $('borrar-busqueda').addEventListener('click', function () {
+    estado.busqueda = '';
+    $('buscar').value = '';
+    pintar();
+    $('buscar').focus();
+  });
 
   document.addEventListener('submit', function (ev) {
     if (ev.target.id !== 'form-persona') return;
