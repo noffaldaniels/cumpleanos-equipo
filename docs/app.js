@@ -253,10 +253,34 @@
       (grande ? '<img class="grande" src="' + grande + '" alt="Foto de ' + e(p.nombre) + '">'
         : '<p class="vacio">' + (v.error ? e(v.error) : 'Cargando la foto…') + '</p>') +
       '<div class="botones">' +
-      (grande ? '<a class="accion principal" download="Cumple ' + e(p.nombre) + '.jpg" href="' + grande + '">⬇ Descargar</a>' : '') +
+      (grande ? '<button class="accion principal" type="button" data-accion="descargar-foto" data-id="' + id + '">⬇ Descargar</button>' : '') +
       '<button class="accion" type="button" data-accion="subir-foto" data-id="' + id + '">📷 Cambiar foto</button>' +
       (estado.editor ? '<button class="accion peligro" type="button" data-accion="quitar-foto" data-id="' + id + '">Quitar foto</button>' : '') +
       '<button class="accion" type="button" data-accion="cerrar-foto">✕ Cerrar</button></div></div></div>';
+  }
+
+  // iPhone (y el navegador de WhatsApp) no descarga con <a download>: allí se abre el menú
+  // de compartir del teléfono, que trae "Guardar imagen". En el computador descarga normal.
+  function descargarFoto(id) {
+    var p = estado.personas.find(function (x) { return x.id === id; });
+    var datos = atob(estado.grandes[id].slice(JPG.length));
+    var bytes = new Uint8Array(datos.length);
+    for (var i = 0; i < datos.length; i++) bytes[i] = datos.charCodeAt(i);
+    var nombre = 'Cumple ' + p.nombre + '.jpg';
+    var archivo = new File([bytes], nombre, { type: 'image/jpeg' });
+    if (navigator.canShare && navigator.canShare({ files: [archivo] })) {
+      return navigator.share({ files: [archivo] }).catch(function (err) {
+        if (err.name !== 'AbortError') avisar('No se pudo guardar. Deja el dedo sobre la foto y elige "Guardar imagen".');
+      });
+    }
+    var url = URL.createObjectURL(archivo);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = nombre;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
   }
 
   function verFoto(id) {
@@ -459,6 +483,7 @@
     if (accion === 'no-quitar') { estado.confirmar = null; return pintar(); }
     if (accion === 'quitar' || accion === 'restaurar') return cambiarEstado(accion, id);
     if (accion === 'ver-foto') return verFoto(id);
+    if (accion === 'descargar-foto') return descargarFoto(id);
     if (accion === 'cerrar-foto') { estado.verFoto = null; return pintar(); }
     if (accion === 'quitar-foto') return quitarFoto(id);
     if (accion === 'subir-foto') {
